@@ -164,6 +164,7 @@
       font-size:13px;
       display:none;
       max-width:92vw;
+      z-index:9999;
     }
   </style>
 </head>
@@ -310,9 +311,16 @@
 
     <section id="forma" class="card">
       <h2>Počni danas</h2>
-      <form id="leadForm" action="#" method="POST" data-formspree="https://formspree.io/f/movgbpae">
+
+      <!-- FIX: action ide na Formspree (fallback), JS hvata submit i pokazuje toast -->
+      <form id="leadForm"
+            action="https://formspree.io/f/movgbpae"
+            method="POST"
+            data-formspree="https://formspree.io/f/movgbpae">
+
         <input type="hidden" name="_subject" value="CV/Job prep upit (sa sajta)" />
-<div class="formRow">
+
+        <div class="formRow">
           <div>
             <label for="name">Ime i prezime</label>
             <input id="name" name="name" autocomplete="name" required placeholder="npr. Marko Marković" />
@@ -356,7 +364,9 @@
 
         <div class="ctaRow" style="margin-top:14px">
           <button class="btn primary" type="submit">Pošalji upit</button>
+          <button class="btn" type="button" id="copyBtn">Kopiraj poruku</button>
         </div>
+
         <p class="note">
           Privatnost: podatke koristim samo da uradim CV/pripremu. Ne objavljujem ništa bez tvoje dozvole.
         </p>
@@ -398,31 +408,21 @@
       payeeAccount: "XXX-XXXXXXXXXXXX-XX"
     };
 
-    // Apply config to UI
-    document.getElementById("yourNameTop").textContent = CONFIG.yourName;
-    document.getElementById("yourNameBottom").textContent = CONFIG.yourName;
-    const emailLink = document.getElementById("emailLink");
-    emailLink.textContent = CONFIG.email;
-    emailLink.href = "mailto:" + CONFIG.email;
+    // Apply config to UI (guardovano - da ne puca ako nema elemenata)
+    const yourNameTop = document.getElementById("yourNameTop");
+    const yourNameBottom = document.getElementById("yourNameBottom");
+    if (yourNameTop) yourNameTop.textContent = CONFIG.yourName;
+    if (yourNameBottom) yourNameBottom.textContent = CONFIG.yourName;
 
-    const phoneLink = document.getElementById("phoneLink");
-    phoneLink.textContent = CONFIG.phone;
-    phoneLink.href = "tel:" + CONFIG.phone.replace(/\\s+/g,"");
-
-    const calLink = document.getElementById("calLink");
-    calLink.textContent = CONFIG.calendlyOrBookingLink ? "Zakaži termin" : "Dodaj link";
-    calLink.href = CONFIG.calendlyOrBookingLink || "#";
-
-    document.getElementById("payeeName").textContent = CONFIG.payeeName;
-    document.getElementById("payeeAccount").textContent = CONFIG.payeeAccount;
-
-    document.getElementById("year").textContent = new Date().getFullYear();
+    const yearEl = document.getElementById("year");
+    if (yearEl) yearEl.textContent = new Date().getFullYear();
 
     // Package quick-fill
     document.querySelectorAll("[data-package]").forEach(btn => {
       btn.addEventListener("click", () => {
         const pkg = btn.getAttribute("data-package");
         const sel = document.getElementById("package");
+        if(!sel) return;
         for (const opt of sel.options) {
           if (opt.text === pkg) { sel.value = opt.text; break; }
         }
@@ -431,6 +431,7 @@
 
     function showToast(msg){
       const t = document.getElementById("toast");
+      if(!t) return;
       t.textContent = msg;
       t.style.display = "block";
       clearTimeout(window.__toastTimer);
@@ -453,22 +454,20 @@
         "",
         "Hvala!"
       ];
-      return lines.join("
-");
+      // FIX: ranije ti je ovde bio prelom reda u stringu i rušio JS
+      return lines.join("\n");
     }
 
-    function encodeMailto(str){
-      return encodeURIComponent(str).replace(/%20/g, "+");
-    }
+    const form = document.getElementById("leadForm");
 
-    
-    // Extra guard: prevent default form navigation even if something else attaches later
+    // Extra guard: spreči bilo kakvu navigaciju čak i ako nešto drugo hvata submit
     document.addEventListener("submit", (ev) => {
       const f = ev.target;
       if (f && f.id === "leadForm") ev.preventDefault();
     }, true);
 
     function setSending(isSending){
+      if(!form) return;
       const btn = form.querySelector('button[type="submit"]');
       if(!btn) return;
       btn.disabled = isSending;
@@ -476,91 +475,90 @@
       btn.textContent = isSending ? "Šaljem…" : "Pošalji upit";
     }
 
-const form = document.getElementById("leadForm");
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+    if (form) {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
 
-      const data = {
-        name: document.getElementById("name").value.trim(),
-        contact: document.getElementById("contact").value.trim(),
-        role: document.getElementById("role").value,
-        package: document.getElementById("package").value,
-        links: document.getElementById("links").value.trim(),
-        notes: document.getElementById("notes").value.trim()
-      };
+        const data = {
+          name: document.getElementById("name")?.value.trim(),
+          contact: document.getElementById("contact")?.value.trim(),
+          role: document.getElementById("role")?.value,
+          package: document.getElementById("package")?.value,
+          links: document.getElementById("links")?.value.trim(),
+          notes: document.getElementById("notes")?.value.trim()
+        };
 
-      if(!data.name || !data.contact || !data.role || !data.package){
-        showToast("Popuni obavezna polja (ime, kontakt, pozicija, paket).");
-        return;
-      }
+        if(!data.name || !data.contact || !data.role || !data.package){
+          showToast("Popuni obavezna polja (ime, kontakt, pozicija, paket).");
+          return;
+        }
 
-      setSending(true);
+        setSending(true);
 
-      // Build a readable message field (so you get one clean email)
-      const msg = buildMessage(data);
+        const msg = buildMessage(data);
+        const fd = new FormData(form);
+        fd.set("message", msg);
 
-      const fd = new FormData(form);
-      // Keep original fields + add a single 'message' field for readability
-      fd.set("message", (msg || "").replace(/\\n/g, "\n"));
+        // Reply-to ako je kontakt email
+        const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.contact);
+        if (looksLikeEmail) fd.set("_replyto", data.contact);
 
-      // If contact looks like an email, tell Formspree what to use for reply-to
-      const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.contact);
-      if (looksLikeEmail) {
-        fd.set("_replyto", data.contact);
-      }
+        try{
+          const endpoint = form.dataset.formspree || form.action;
+          const res = await fetch(endpoint, {
+            method: "POST",
+            body: fd,
+            headers: { "Accept": "application/json" }
+          });
 
-      try{
-        const res = await fetch((form.dataset.formspree || "https://formspree.io/f/movgbpae"), {
-          method: "POST",
-          body: fd,
-          headers: { "Accept": "application/json" }
-        });
-
-        if(res.ok){
-          form.reset();
-          showToast("Poslato ✅ Javljam se uskoro sa narednim koracima i instrukcijama za uplatu.");
-          setSending(false);
-        } else {
-          let errTxt = "Greška pri slanju. Pokušaj ponovo ili pošalji ručno.";
-          try {
-            const data = await res.json();
-            if (data && data.errors && data.errors.length) {
-              errTxt = data.errors.map(e => e.message).join(" · ");
-            }
-          } catch(_) {}
-          showToast(errTxt);
+          if(res.ok){
+            form.reset();
+            showToast("Poslato ✅ Javljam se uskoro sa narednim koracima i instrukcijama za uplatu.");
+          } else {
+            let errTxt = "Greška pri slanju. Pokušaj ponovo ili kopiraj poruku pa pošalji ručno.";
+            try {
+              const j = await res.json();
+              if (j && j.errors && j.errors.length) errTxt = j.errors.map(e => e.message).join(" · ");
+            } catch(_) {}
+            showToast(errTxt);
+          }
+        }catch(err){
+          showToast("Nema konekcije / blokirano slanje. Kopiraj poruku i pošalji ručno.");
+        }finally{
           setSending(false);
         }
-      }catch(err){
-        showToast("Nema konekcije / blokirano slanje. Kopiraj poruku i pošalji ručno.");
-        setSending(false);
-      }
-    });
-document.getElementById("copyBtn").addEventListener("click", async () => {
-      const data = {
-        name: document.getElementById("name").value.trim() || "(bez imena)",
-        contact: document.getElementById("contact").value.trim() || "(bez kontakta)",
-        role: document.getElementById("role").value || "(nije izabrano)",
-        package: document.getElementById("package").value || "(nije izabrano)",
-        links: document.getElementById("links").value.trim(),
-        notes: document.getElementById("notes").value.trim()
-      };
-      const msg = buildMessage(data);
+      });
+    }
 
-      try{
-        await navigator.clipboard.writeText(msg);
-        showToast("Poruka kopirana. Nalepi u email/Viber.");
-      }catch(err){
-        // Fallback
-        const ta = document.createElement("textarea");
-        ta.value = msg;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        ta.remove();
-        showToast("Poruka kopirana (fallback).");
-      }
-    });
+    const copyBtn = document.getElementById("copyBtn");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", async () => {
+        const data = {
+          name: document.getElementById("name")?.value.trim() || "(bez imena)",
+          contact: document.getElementById("contact")?.value.trim() || "(bez kontakta)",
+          role: document.getElementById("role")?.value || "(nije izabrano)",
+          package: document.getElementById("package")?.value || "(nije izabrano)",
+          links: document.getElementById("links")?.value.trim(),
+          notes: document.getElementById("notes")?.value.trim()
+        };
+        const msg = buildMessage(data);
+
+        try{
+          await navigator.clipboard.writeText(msg);
+          showToast("Poruka kopirana. Nalepi u email/Viber.");
+        }catch(err){
+          const ta = document.createElement("textarea");
+          ta.value = msg;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+          showToast("Poruka kopirana (fallback).");
+        }
+      });
+    }
   </script>
 </body>
 </html>
